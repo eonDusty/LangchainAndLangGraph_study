@@ -386,3 +386,180 @@ LangGraph 本身是一个用于构建**有状态、多步骤应用**的框架，
 
 ****
 
+#### LLM大模型连接与通信
+
+**LLM大模型连接与通信**
+在构建 AI 应用时，与底层大模型（如 GPT-4、Claude、Qwen 等）进行稳定、规范的连接与通信是第一步。
+
+LangChain 和 LangGraph 在这方面扮演着不同的角色：
+
+LangChain 提供了标准化的连接器，而 LangGraph 则定义了在复杂流程中如何精准地调度这些连接。
+
+**主要有两种方式**
+
+1. ChatOpenAI( )
+
+   ```python
+   from langchain_openai import ChatOpenAI
+   from langchain_core.messages import SystemMessage, HumanMessage
+   import dotenv
+   import dotenv
+   import os
+   
+   dotenv.load_dotenv()
+   chat_model = ChatOpenAI(
+       model="gpt-3.5-turbo",
+       api_key=os.getenv("openai_api_key_chat"),
+       base_url=os.getenv("openai_base_url_chat"),
+       temperature=0.8,
+       max_tokens=1000
+   )
+   system_message = SystemMessage(
+       content="你是一个AI助手，请根据用户的问题给出回答。",
+       additional_kwargs={"tool":"inv"})
+   human_message = HumanMessage(content="什么是langchain",)
+   messages = [system_message, human_message]
+   
+   response = chat_model.invoke(messages)
+   print(type(response)) # AIMessage
+   print(response.content)
+   ```
+
+2. init_chat_model( )
+
+   ```python
+   from langchain.chat_models import init_chat_model
+   model = init_chat_model(
+       "Qwen/Qwen3-8B",
+       model_provider="openai",
+       base_url = "https://api.siliconflow.cn/v1",
+       api_key = "sk-frhnxxxxxxxxxxxxxxxxxxxxxjtmckx"
+   )
+   ```
+
+**四种通信方式**
+
+在通过 LangChain 建立连接后，我们如何让模型干活？LangChain 提供了四个核心动词：`invoke`、`stream`、`astream`、`batch`。它们的区别在于**阻塞与否**以及**数据返回的粒度**。
+
+假设我们向模型提问：“写一篇500字的作文”。以下是四种通信方式的直观对比：
+
+| 通信方式      | 中文释义 | 阻塞/异步      | 用户体验                                                     | 适用场景                                             |
+| :------------ | :------- | :------------- | :----------------------------------------------------------- | :--------------------------------------------------- |
+| **`invoke`**  | 同步调用 | 🔴 阻塞         | **“憋大招”**：等几十秒完全没反应，然后瞬间输出全部500字。    | 后台脚本、数据处理流水线、不需要直接面向用户的场景。 |
+| **`stream`**  | 同步流式 | 🔴 阻塞(生成器) | **“打字机”**：一个字一个字往外蹦，但有感知。                 | 简单的命令行工具、Jupyter Notebook 测试。            |
+| **`astream`** | 异步流式 | 🟢 非阻塞       | **“极速打字机”**：一边蹦字，程序还能同时处理其他任务（如接收用户中断指令）。 | **Web 后端、高并发 API、最核心的生产环境首选。**     |
+| **`batch`**   | 批量调用 | 🔴 阻塞         | 并发处理多个独立任务，全做完后一起返回。                     | 离线数据打标、一次性翻译1000条句子。                 |
+
+```python
+from langchain_core.messages import SystemMessage, HumanMessage
+
+# 统一的提问
+essay_messages = [
+    SystemMessage(content="你是一位中文写作老师，文章结构清晰，语言自然。"),
+    HumanMessage(content="写一篇500字的作文，题目《春天的校园》。")
+]
+
+# 1) invoke：同步 + 一次性返回完整结果
+resp = llm.invoke(essay_messages)
+print(resp.content)
+
+# 2) stream：同步 + 分块返回（边生成边输出）
+for chunk in llm.stream(essay_messages):
+    if chunk.content:
+        print(chunk.content, end="", flush=True)
+print()  # 换行
+
+# 3) astream：异步 + 分块返回（适合并发/异步服务）
+# 说明：有些版本/模型返回的 chunk 里，content 可能阶段性为空，
+#      因此不要用 `if chunk.content:` 过早过滤；先尽量打印/累积。
+
+async def run_astream():
+    parts = []
+    async for chunk in llm.astream(essay_messages):
+        content = getattr(chunk, "content", None)
+
+        # content 通常是 str；少数情况下可能是 list/None
+        if isinstance(content, str):
+            if content:
+                print(content, end="", flush=True)
+            parts.append(content)
+        elif content is not None:
+            # 兜底：直接打印非字符串内容，避免“看起来没输出”
+            print(str(content), end="", flush=True)
+            parts.append(str(content))
+        else:
+            # 再兜底：把 chunk 的结构打出来，方便定位
+            # （只打很短的一行，避免刷屏）
+            parts.append("")
+
+    final_text = "".join([p for p in parts if isinstance(p, str)])
+    if final_text.strip() == "":
+        print("\n[debug] astream 收到的 chunk.content 全为空；请改用下面的 ainvoke/stream 或检查依赖版本。")
+    else:
+        print()  # 换行
+
+await run_astream()
+
+# 4) batch：同步 + 批量输入，一次性返回多个结果
+batch_inputs = [
+    essay_messages,
+    [
+        SystemMessage(content="你是一位中文写作老师，文章结构清晰，语言自然。"),
+        HumanMessage(content="写一篇500字的作文，题目《雨后的城市》。")
+    ],
+]
+
+batch_resps = llm.batch(batch_inputs)
+for i, r in enumerate(batch_resps, start=1):
+    print(f"\n--- 第{i}篇 ---")
+    print(r.content) 
+#--- 第1篇 ---
+#《春天的校园》
+#    ....
+#--- 第2篇 ---
+#题目：《雨后的城市》
+#    ....
+```
+
+##### 消息类型
+
+- 标准消息类型
+  - `SystemMessage`：设定 AI 的人设和全局规则。
+  - `HumanMessage`：用户的输入。
+  - `AIMessage`：模型的历史回复（在多轮对话中至关重要）。
+
+|     类型     | LangChain 类名  |        角色定位         | 底层对应的 API 标识 |                           核心作用                           |
+| :----------: | :-------------: | :---------------------: | :-----------------: | :----------------------------------------------------------: |
+| **系统消息** | `SystemMessage` | **幕后导演 / 人设设定** |     `"system"`      | 最高优先级。设定 AI 的行为准则、性格、全局规则，模型通常不会在回复中直接提及它。 |
+| **人类消息** | `HumanMessage`  |    **用户 / 提问者**    |      `"user"`       |  触发模型生成的源头。包含用户的提问、指令或需要处理的数据。  |
+| **AI 消息**  |   `AIMessage`   |    **助手 / 回答者**    |    `"assistant"`    | 记录模型历史生成的文本。在**多轮对话**中，必须把 AI 之前的回答作为 `AIMessage` 喂给它，它才知道自己刚才说了什么。 |
+
+**工具消息**：`ToolMessage`（工具消息）是 Agent（智能体）架构中**不可或缺的“结果回执”**。
+
+`ToolMessage` 就是代码环境写给大模型的“工作汇报”，它的存在补齐了“模型发令 -> 代码执行 -> 结果反馈 -> 模型总结”的闭环，没有它，Agent 就是个只会发号施令却得不到反馈的瞎子。
+
+```python
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+```
+
+##### LangGraph
+
+既有langchain的messages机制，在构建状态图中主要使用自定义的State来进行消息的流转
+
+LangGraph 本身**不负责**创建大模型连接（它直接复用 LangChain 的 `ChatOpenAI` 等对象）。但是，在 LangGraph 构建的多步骤 Agent 工作流中，大模型的通信方式发生了本质变化：
+
+1. **状态驱动通信**：模型不再孤立地被调用，它必须读取当前图的 `State`（状态），处理后将结果写回 `State`。
+2. **工具调用通信**：在 Agent 场景中，与大模型通信不仅是为了获取文本，更关键的是获取它想要调用的“工具指令”（如搜索数据库）。
+3. **基于条件的循环通信**：如果模型返回“需要调用工具”，Graph 会拦截这个响应，跳转到工具节点执行，然后再把工具结果作为新消息发给模型（形成通信循环），直到模型给出最终答案。
+
+##### 总结
+
+| 维度         | LangChain 层面                                 | LangGraph 层面                                               |
+| :----------- | :--------------------------------------------- | :----------------------------------------------------------- |
+| **职责**     | 建立 TCP/HTTP 连接，处理鉴权、流式、异常重试。 | 将大模型调用编排为有状态图中的一个节点。                     |
+| **输入来源** | 开发者手动传入的 `messages` 列表。             | 从图的统一 `State` 中自动读取上下文。                        |
+| **输出去向** | 直接返回给 Python 变量。                       | 必须返回特定格式的字典，用于更新图的 `State`。               |
+| **通信模式** | 通常是“一问一答”的单次通信。                   | 支持“模型调用工具 -> 观察结果 -> 再次调用模型”的**循环通信**。 |
+
+#### Prompt模板
+
