@@ -112,7 +112,59 @@ Quick Start（在仓库根目录执行）
    	集中管理（单一职责）：所有创建对象的代码都在工厂里。如果某个切分器的初始化参数变了，只需要改工厂类，不用去翻遍整个项目的业务代码。
    	完美配合多态/ABC：工厂返回的通常是抽象基类（如 BaseSplitter）的接口，调用者用统一的方法（如 split()）操作，根本不知道具体是哪个子类。
 
-   
+
+
+
+
+
+### LLM
+
+核心函数：src/libs/llm/llm_factory.py
+
+用来根据 settings.yaml/Settings 中的配置，创建并返回对应的 LLM 实例，实现“换模型/换后端只改配置不改代码”。
+
+- 文本 LLM 创建：LLMFactory.create(settings, **override_kwargs)
+
+  - 从 settings.llm.provider 读取 provider 名称
+
+  - 在 _PROVIDERS 注册表里找到对应的 BaseLLM 子类并实例化
+
+  - 支持用 override_kwargs 覆盖部分配置参数
+
+  - provider 不存在或配置缺失时抛出明确异常
+
+- 视觉（多模态）LLM 创建：LLMFactory.create_vision_llm(settings, **override_kwargs)
+
+  - 优先读 settings.vision_llm.provider，否则回退到 settings.llm.provider
+
+  - 在 _VISION_PROVIDERS 注册表里找到对应的 BaseVisionLLM 子类并实例化
+
+  - provider 不存在或配置缺失时抛出明确异常
+
+- 注册与枚举
+
+  - register_provider() / list_providers()
+
+  - register_vision_provider() / list_vision_providers()
+
+- 模块加载时自动注册视觉 provider
+  - _register_vision_providers() 在导入时运行，尝试注册 Azure/OpenAI/SiliconFlow 等 Vision LLM（未安装/未实现则跳过）。
+
+测试：
+
+BaseLLM + LLMFactory + 16个单元测试
+
+```cmd
+(.venv) PS F:\A_SCU\Code\MODULAR-RAG-MCP-SERVER\tests\unit> pytest -q .\test_llm_factory.py   
+
+collected 16 items
+
+test_llm_factory.py ................                                                               [100%]
+
+========================================== 16 passed in 0.29s =========================================== 
+```
+
+
 
 ### Splitter
 
@@ -137,6 +189,20 @@ Quick Start（在仓库根目录执行）
   - page_num：尝试从第一张被引用图片的 page 推断页码
 
 - 输出：返回 List[Chunk]（每个 Chunk 含 id/text/metadata）
+
+测试：
+
+BaseSplitter + SplitterFactory + 20个单元测试
+
+```cmd
+(.venv) PS F:\A_SCU\Code\MODULAR-RAG-MCP-SERVER\tests\unit> pytest -q test_splitter_factory.py
+
+collected 20 items
+
+test_splitter_factory.py ....................                                                     [100%]  
+
+========================================== 20 passed in 0.30s ==========================================  
+```
 
 
 
@@ -561,5 +627,255 @@ LangGraph 本身**不负责**创建大模型连接（它直接复用 LangChain �
 | **输出去向** | 直接返回给 Python 变量。                       | 必须返回特定格式的字典，用于更新图的 `State`。               |
 | **通信模式** | 通常是“一问一答”的单次通信。                   | 支持“模型调用工具 -> 观察结果 -> 再次调用模型”的**循环通信**。 |
 
-#### Prompt模板
+****
+
+#### Prompt提示词模板
+
+##### Langchain
+
+在 LangChain 中，直接把一长串字符串写死在代码里是非常糟糕的做法。
+
+**提示词模板**的作用就是**“分离结构与人设（模板）和动态数据（变量）”**。
+
+**一、 最基础的模板（输出纯字符串）**
+
+1. PromptTemplate（字符串提示模板）
+
+- **概念**：最基础的模板，用来生成一段**纯粹的字符串**。它不区分什么系统、用户角色，最终拼接出来的结果就是一个大字符串。
+- **适用场景**：简单的单轮问答、文本摘要、翻译、格式化输出（如让模型输出 JSON）。
+- **特点**：使用 `{变量名}` 作为占位符。
+
+```python
+from langchain_core.prompts import PromptTemplate
+
+template = "请把下面的{lang}翻译成中文：{text}"
+prompt = PromptTemplate.from_template(template)
+# 调用: prompt.format(lang="英文", text="Hello world")
+# 结果: "请把下面的英文翻译成中文：Hello world"
+
+```
+
+**二、 样本增强模板（提升准确率）**
+
+2. FewShotPromptTemplate（少样本提示词模板）
+
+- **概念**：大模型有“举一反三”的能力。这个模板专门用来包装**“几个优秀的问答示例”**，然后再附上用户真正要问的问题。
+- **适用场景**：需要严格控制输出格式（如自定义情感分析标签、特定的结构化数据提取），但不想微调模型时。
+- **结构**：通常包含一个 `PromptTemplate`（作为最终提问的格式）+ 一个 `examples` 列表（作为示范）。
+
+```python
+# 内部逻辑类似：
+# 示例1：输入:"苹果很好吃" -> 输出:"正向"
+# 示例2："这电影太烂了" -> 输出："负向"
+# 现在请判断：{user_input}
+```
+
+**三、 角色扮演模板（贴合 Chat API）**
+
+现代大模型（如 GPT）是基于聊天优化的，需要明确区分谁在说话。**3~7 号模板都是为了生成前面讲过的 `Message` 对象列表**。
+
+3. ChatPromptTemplate（聊天提示模板 - 🌟 最常用）
+
+- **概念**：大管家。它不直接写字符串，而是负责把下面 4、5、6 号模板组装成一个完整的“消息列表”。
+- **适用场景**：99% 的多轮对话、Agent 开发、RAG 检索增强。
+
+```python
+from langchain_core.prompts import ChatPromptTemplate
+
+prompt = ChatPromptTemplate.from_messages([
+    ("system", "你是一个{role}，只用{style}回答。"), # 隐式调用了 SystemMessagePromptTemplate
+    ("user", "{question}")                          # 隐式调用了 HumanMessagePromptTemplate
+])
+# 调用后会直接生成: [SystemMessage(...), HumanMessage(...)]
+
+```
+
+4. HumanMessagePromptTemplate（人类消息模板）
+
+- **概念**：专门生成 `HumanMessage` 的模板。
+- **注意**：现在**很少单独使用它**了，因为在 `ChatPromptTemplate.from_messages()` 中直接写 `("user", "...")` 就等于隐式调用了它。
+
+5. AIMessagePromptTemplate（AI 消息模板）
+
+- **概念**：专门生成 `AIMessage` 的模板。
+- **使用场景**：在**多轮对话历史恢复**时使用。比如你想在提问前，伪造一段“你之前问了什么，AI 答了什么”的历史上下文塞给模型。
+
+```python
+# 假设你要构建包含历史的 prompt
+history = AIMessagePromptTemplate.from_template("我刚才查到了结果：{result}")
+```
+
+6. SystemMessagePromptTemplate（系统消息模板）
+
+- **概念**：专门生成 `SystemMessage` 的模板。
+- **注意**：同上，通常被 `("system", "...")` 元组语法取代，很少单独实例化。
+
+7. ChatMessagePromptTemplate（自定义角色消息模板）
+
+- **概念**：用来生成 `ChatMessage` 的模板。它比上面几个多了一个 `role` 参数。
+- **使用场景**：极少数非标准的第三方模型，它们不支持 system/user/assistant，而是支持自定义角色（比如 role=“bartender” 酒保，role=“interviewer” 面试官）。
+
+```python
+from langchain.prompts import ChatMessagePromptTemplate
+# 指定一个非标准的自定义角色
+prompt = ChatMessagePromptTemplate.from_template(role="兽医", template="作为一名{animal_type}医生，{question}")
+```
+
+**四、 复杂工程化模板**
+
+8. PipelinePrompt（管道提示词模板）
+
+- **概念**：类似于 Linux 的管道符 `|`。当你的系统提示词非常长（比如包含几百行的规则文档、各种 FewShot 示例），写在一个文件里没法维护。`PipelinePrompt` 允许你把大模板**拆分成多个小块（部分）**，最后像拼积木一样拼起来。
+- **适用场景**：超大型企业级应用的 Prompt 管理。
+
+```python
+# 伪代码逻辑
+final_prompt = PipelinePrompt(
+    final_prompt=PromptTemplate.from_template("{introduction}\n{examples}\n{user_question}"),
+    pipeline_prompts=[
+        ("introduction", intro_template),  # 拼接块1：公司背景介绍
+        ("examples", few_shot_template),   # 拼接块2：示例库
+        ("user_question", user_template)   # 拼接块3：用户真实问题
+    ]
+)
+```
+
+9. 自定义模板
+
+- **概念**：LangChain 默认使用 Python 的字符串 `format()` 方法来填充 `{变量}`。
+
+****
+
+#### 输出解析器
+
+🔥 常用解析器
+
+1. StrOutputParser（字符串解析器）
+
+最基础的解析器，只做一件事：把 `AIMessage` 对象剥壳，提取出里面的纯文本字符串。日常开发中用得最多，几乎每条 LCEL 链都会用到它。
+
+```python
+# StrOutputParser：字符串解析器
+from langchain_core.output_parsers import StrOutputParser
+
+parser = StrOutputParser()
+str_response = parser.invoke(response)
+print(str_response)
+print(type(str_response)) # <class 'str'>
+```
+
+2. JsonOutputParser（JSON 解析器）
+
+把模型输出的 JSON 字符串解析成 Python 字典。**前提是你必须在 Prompt 中明确告诉模型"以 JSON 格式返回"**，否则模型可能夹杂一堆废话导致解析失败。结构化数据提取的首选。
+
+```python
+# JsonOutputParser：JSON解析器，确保输出符合特定JSON对象格式，在提示词中必须指定返回的数据格式为json
+from langchain_core.output_parsers import JsonOutputParser
+
+parser = JsonOutputParser()
+print("parser.get_format_instructions():",parser.get_format_instructions()) # 可将parser.get_format_instructions()复制到提示词中
+json_response = parser.invoke(response)
+print(json_response)
+print(type(json_response)) # <class 'dict'>
+# # 链：将多个组件组合在一起，并自动处理输入和输出
+chain = chat_model_stream | parser
+json_result = chain.invoke("请用json格式返回你的答案，你的答案是：1+1=?")
+print(json_result)
+```
+
+3. XMLOutputParser（XML 解析器）
+
+让模型以 XML 格式输出，然后**自动解析成 Python 字典**返回给你（不是原始 XML 字符串）。同样需要在 Prompt 中指定返回 XML 格式。适合处理层级嵌套较深的数据结构。
+
+```python
+parser = XMLOutputParser()
+format_instructions = XMLOutputParser().get_format_instructions()
+prompt = PromptTemplate.from_template(
+    template = "用户的问题：{question},需要使用的格式：{format_instructions}",
+    # input_variables = ["question"], # 会报错，因为input_variables和partial_variables不能同时使用
+    partial_variables = {"format_instructions": format_instructions}
+)
+response = chat.invoke(prompt.format(question="什么是langchain?"))
+print(response.content)
+print(type(response))
+xml_result = parser.invoke(response)
+print("xml_result:")
+print(xml_result)
+print(type(xml_result))
+```
+
+4. CommaSeparatedListOutputParser（逗号分隔列表解析器）
+
+让模型以逗号分隔输出内容，解析后返回 Python 列表。比如让模型"列举三种编程语言"，返回的就是 `["Python", "Java", "Go"]`。列举类任务的利器。
+
+5. DatetimeOutputParser（日期时间解析器）
+
+专门处理日期时间。模型经常输出"大概下周三"或"2024年3月15号下午"这种口语化表达，这个解析器能将其统一转换为标准的 `datetime` 对象。
+
+⚡ 特殊场景解析器
+
+6. EnumOutputParser（枚举解析器）
+
+预先定义好一组合法选项（如"正面/负面/中性"），模型输出后强制映射到其中某个枚举值。输出不在选项内就报错。**适合情感分析、分类任务**，杜绝模型自由发挥。
+
+7. StructuredOutputParser（结构化解析器）
+
+老版本的 JSON 解析器，把非结构化文本转换为预定义的字典结构。功能与 `JsonOutputParser` 类似，但现在官方更推荐用 `JsonOutputParser`，属于逐步被替代的角色。
+
+🛠️ 自动修复型解析器（最巧妙的设计）
+
+这两个解析器解决的是同一个痛点：**模型输出的格式不对怎么办？**
+
+8. OutputFixingParser（输出修复解析器） 
+
+模型返回的 JSON 缺了个括号怎么办？这个解析器会尝试**自动修补**常见的格式错误（少引号、少逗号、多出注释等），尽量抢救回来，避免直接报错。（langchain 0.3.14 具有这个特性）
+
+```python
+# from langchain.output_parsers.fix import OutputFixingParser  
+from langchain_core.exceptions import OutputParserException
+```
+
+9. RetryOutputParser（重试解析器）
+
+比 OutputFixingParser 更暴力——**直接把错误的输出发回给 LLM**，告诉它"你刚才的回答格式不对，请修正后重新输出"，然后用修正后的结果再次尝试解析。相当于让模型自己给自己打补丁。（langchain 0.3.14 具有这个特性）
+
+```python
+from langchain.output_parsers.retry import RetryOutputParser
+```
+
+```bash
+模型输出（自由文本）
+    │
+    ├─ 不需要结构化 → StrOutputParser → 纯字符串
+    │
+    ├─ 需要列表     → CommaSeparatedListOutputParser → ["a", "b", "c"]
+    │
+    ├─ 需要日期     → DatetimeOutputParser → datetime对象
+    │
+    ├─ 需要分类     → EnumOutputParser → 枚举值（正面/负面/中性）
+    │
+    ├─ 需要JSON     → JsonOutputParser → Python字典
+    │
+    ├─ JSON格式坏了 → OutputFixingParser → 自动修补 → 再解析
+    │                RetryOutputParser   → 扔回给LLM重答 → 再解析
+    │
+    └─ 需要XML      → XMLOutputParser → Python字典
+
+```
+
+##### 总结
+
+| #    | 解析器                     | 输入示例                                   | 输出                                        | 类型       |
+| :--- | :------------------------- | :----------------------------------------- | :------------------------------------------ | :--------- |
+| 1    | **StrOutputParser**        | `AIMessage("你好，我是AI助手")`            | `"你好，我是AI助手"`                        | `str`      |
+| 2    | **JsonOutputParser**       | `json\n{"name":"张三"}\n`                  | `{'name': '张三'}`                          | `dict`     |
+| 3    | **XMLOutputParser**        | `<person><name>张三</name></person>`       | `{'name': '张三'}`                          | `dict`     |
+| 4    | **CommaSeparatedList**     | `"Python, Java, Go, Rust"`                 | `['Python', 'Java', 'Go', 'Rust']`          | `list`     |
+| 5    | **DatetimeOutputParser**   | `"2024年3月15号下午3点30分"`               | `2024-03-15 15:30:00`                       | `datetime` |
+| 6    | **EnumOutputParser**       | `"正面"`                                   | `Sentiment.POSITIVE`                        | `Enum`     |
+| 7    | **StructuredOutputParser** | `电影名称：星际穿越\n评分：9.5`            | `{'movie': '星际穿越', 'rating': 9.5}`      | `dict`     |
+| 8    | **OutputFixingParser**     | `{"name":"张三", skills: [...]}`（缺引号） | 自动修补 → `{'name':'张三','skills':[...]}` | `dict`     |
+| 9    | **RetryOutputParser**      | `"好的，张三的信息如下：..."`（非JSON）    | 发回LLM重答 → `{'name':'张三'}`             | `dict`     |
+
+****
 
