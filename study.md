@@ -748,7 +748,7 @@ final_prompt = PipelinePrompt(
 
 #### 输出解析器
 
-🔥 常用解析器
+##### 🔥 常用解析器
 
 1. StrOutputParser（字符串解析器）
 
@@ -876,6 +876,246 @@ from langchain.output_parsers.retry import RetryOutputParser
 | 7    | **StructuredOutputParser** | `电影名称：星际穿越\n评分：9.5`            | `{'movie': '星际穿越', 'rating': 9.5}`      | `dict`     |
 | 8    | **OutputFixingParser**     | `{"name":"张三", skills: [...]}`（缺引号） | 自动修补 → `{'name':'张三','skills':[...]}` | `dict`     |
 | 9    | **RetryOutputParser**      | `"好的，张三的信息如下：..."`（非JSON）    | 发回LLM重答 → `{'name':'张三'}`             | `dict`     |
+
+****
+
+#### 文档加载器 Loader
+
+在 LangChain 生态中，**文档加载器** 的核心使命只有一个：**将各种五花八门的外部数据源（PDF、网页、数据库、代码等），统一转换为 LangChain 能够理解的标准化格式 —— `Document` 对象。**
+
+一个标准的 `Document` 对象包含两个核心属性：
+
+- `page_content` (str)：提取出的纯文本内容。
+- `metadata` (dict)：关于这段文本的元数据（如来源 URL、页码、作者、文件名等）。
+
+##### 一、 LangChain 中的文档加载器
+
+1. 传统文件加载器 (本地文件)
+
+用于解析本地磁盘上的文件。
+
+加载最常见的结构化和半结构化文本文件
+
+| 加载器             | 主要用途与特点                                              | 安装依赖              |
+| :----------------- | :---------------------------------------------------------- | :-------------------- |
+| **`TextLoader()`** | 加载**纯文本文件**（如 `.txt`，也可用于 `.md`）。           | `langchain-community` |
+| **`CSVLoader()`**  | 加载 **CSV 表格文件**。支持自定义分隔符、引号字符和列名。   | `langchain-community` |
+| **`JSONLoader()`** | 加载 **JSON 文件**。可以通过 `jq_schema` 参数提取特定字段。 | `jq`                  |
+
+用于加载常见的办公文档，是构建知识库的核心
+
+| 加载器                                 | 主要用途与特点                                               | 安装依赖                      |
+| :------------------------------------- | :----------------------------------------------------------- | :---------------------------- |
+| **`PyPDFLoader()`**                    | 最常用的 **PDF 加载器**。使用 `pypdf` 库逐页提取文本内容。   | `pypdf`                       |
+| **`UnstructuredWordDocumentLoader()`** | 加载 **Word 文档** (`.docx`)。底层使用 `unstructured` 库进行解析。 | `unstructured`, `python-docx` |
+| **`UnstructuredExcelLoader()`**        | 加载 **Excel 表格** (`.xlsx`)。                              | `unstructured`, `openpyxl`    |
+| **`UnstructuredPowerPointLoader()`**   | 加载 **PowerPoint 演示文稿** (`.pptx`)。                     | `unstructured`, `python-pptx` |
+
+当需要处理大量或多种类型的文件时，以下加载器非常高效
+
+| 加载器                         | 主要用途与特点                                               |
+| :----------------------------- | :----------------------------------------------------------- |
+| **`DirectoryLoader()`**        | **批量加载**指定目录下的文件。支持通配符（如 `glob="**/*.pdf"`）匹配，并可结合多线程加速。 |
+| **`UnstructuredFileLoader()`** | **智能加载器**，能自动检测文件格式并调用相应的解析器。       |
+
+主要分为：
+
+```python
+# 文档加载示例
+
+from langchain_community.document_loaders import (
+    PyPDFLoader,
+    TextLoader,
+    Docx2txtLoader,
+    DirectoryLoader, # 批量加载
+)
+# 加载pdf
+pdf_loader = PyPDFLoader("./02-load.pdf")
+pdf_docs = pdf_loader.load()
+
+print(f"加载了 {len(pdf_docs)} documents")
+print("第一页的内容预览：")
+print(pdf_docs[0].page_content[:100])
+print("Documents结构：")
+print(pdf_docs)
+
+# # 加载word
+# docx_loader = Docx2txtLoader("./01-load.docx")
+# docx_docs = docx_loader.load()
+
+# # 加载txt
+# txt_loader = TextLoader("./test.txt",encoding="utf-8")
+# txt_docs = txt_loader.load()
+# print(f"加载了 {len(txt_docs)} documents")
+# print("第一页的内容预览：")
+# print(txt_docs[0].page_content[:100])
+
+# # 加载目录下的所有文件
+# dir_loader = DirectoryLoader(
+#     "./",
+#     glob = "**/*.pdf", # 匹配所有pdf文件
+#     loader_cls = PyPDFLoader
+# )
+# all_docs = dir_loader.load()
+# print(f"加载了 {len(all_docs)} documents")
+# print("第一页的内容预览：")
+# print(all_docs[0].page_content[:100])
+
+# Documents 对象结构
+from langchain_core.documents import Document
+doc = Document(
+    page_content = "这是文档内容",
+    metadata = {
+        "source": "test.txt",
+        "page": 1,
+        "author": "LangChain",
+        "date": "2023-01-01"
+    }
+)
+```
+
+
+
+2. 网络与云服务加载器 (在线数据)
+
+```python
+from langchain_community.document_loaders import WebBaseLoader
+import asyncio
+
+# 加载网页（底层通常使用 httpx 或 BeautifulSoup）
+web_loader = WebBaseLoader("https://python.langchain.com/docs/")
+web_docs = web_loader.load()
+# web_docs[0].metadata = {'source': 'https://...', 'title': '...'}
+
+```
+
+3. 高级变体：懒加载 与 异步加载
+
+当处理几百个 PDF 或大量网页时，一次性 `.load()` 全部放进内存会撑爆 RAM。
+
+- **`.lazy_load()`**：返回一个生成器，一次只 yield 一个 Document。
+- **`.aload()`**：异步版本，配合 `asyncio` 并发抓取几十个网页，速度提升数倍。
+
+##### 二、 LangGraph 中的文档加载器（节点中的工具）
+
+**首先澄清一个概念：LangGraph 本身没有、也不需要发明新的文档加载器。** LangGraph 直接复用 LangChain 的所有加载器。
+
+但在 LangGraph 的**状态图**架构中，文档加载器的定位发生了变化：
+
+- 在 LangChain 中，它通常是**写在脚本最开头**的流水线代码。
+- 在 LangGraph 中，它被封装成一个**图节点**，成为自动化工作流中的一个可控制、可分支、可重试的步骤。
+
+##### 三、llamaIndex文档加载器
+
+LlamaIndex 加载器的核心设计哲学是：**一切为了构建高效的 Node（节点）树。** 它不仅仅满足于把文件变成字符串，而是强调整合元数据，为后续的切片和向量索引打下完美基础。
+
+在 LlamaIndex 中，加载器统一被称为 `Reader`。
+
+**LlamaIndex 的两大数据容器概念：**
+
+在看加载器之前，必须先理解 LlamaIndex 独有的数据结构（这与 LangChain 的 `Document` 不同）：
+
+1. **`Document`**：代表整个原始文件（比如一整篇 PDF、一个完整的网页）。它包含 `text` (全文) 和 `metadata` (文件级元数据，如文件名、作者)。
+2. **`TextNode`**：代表从 `Document` 中切分出来的**文本块**（Chunk）。它不仅有 `text`，还有 `metadata`（块级元数据，如属于第几页、在原文的起止位置），以及**关系指针**（指向它的父 Document 和前后相邻的 Node）。*（注意：LlamaIndex 的加载器直接产出 `Document`，切片后才产出 `TextNode`）*。
+
+**核心加载器分类与代码示例：**
+
+1. 简单文本与标记语言
+
+对于 `.txt` 和 `.md`，LlamaIndex 提供了最轻量级的原生加载器。
+
+```python
+from llama_index.core import SimpleDirectoryReader
+
+# LlamaIndex 的杀手锏：自动根据文件后缀名派发对应的 Reader！
+# 它会自动识别 .txt, .md, .pdf, .csv 等，无需你手动选择类
+documents = SimpleDirectoryReader("./data_folder").load_data()
+
+print(f"加载了 {len(documents)} 个完整文档")
+print(documents[0].metadata) # 通常包含 'file_name', 'file_path'
+
+```
+
+如果你想**手动指定**加载单个 Markdown 并保留其结构元数据：
+
+```python
+from llama_index.readers.file import MarkdownReader
+
+reader = MarkdownReader()
+docs = reader.load_data(file_path="./example.md")
+```
+
+2. 网页与在线文档加载器
+
+LlamaIndex 把第三方数据源的加载器统称为 `LlamaHub`。现在它们都被整合到了 `llama-index-readers-*` 的命名空间下。
+
+```
+# 需安装：pip install llama-index-readers-web
+from llama_index.readers.web import SimpleWebPageReader
+
+reader = SimpleWebPageReader()
+docs = reader.load_data(urls=["https://example.com"])
+```
+
+加载高级结构化网页（如 Readthedocs、Gitbook、Notion）：
+LlamaIndex 在这方面做得比 LangChain 更专精，它有专门的爬虫来保留网站的目录结构。
+
+```python
+# 需安装：pip install llama-index-readers-web
+from llama_index.readers.web import ReadabilityWebPageReader
+
+# 使用 Mozilla 的 Readability 算法，自动剔除网页广告、导航栏，只留核心正文
+reader = ReadabilityWebPageReader()
+docs = reader.load_data(urls=["https://blog.example.com/article-123"])
+```
+
+**LlamaIndex 加载器的高级特性**
+
+LlamaIndex 的 `SimpleDirectoryReader` 表面上看只是个遍历文件夹的工具，实际上它内置了许多 RAG 必备的高级功能：
+
+**特性 1：文件级元数据继承**
+
+如果你在加载时手动注入了额外的元数据，切分后的每一个小块都会自动继承这些信息。
+
+**特性 2：内置多线程与异步极速加载**
+
+处理大量文件时，不需要自己写并发代码，加两个参数即可：
+
+```python
+# 开启多线程加载 1000 个文件
+docs = SimpleDirectoryReader(
+    "./huge_folder", 
+    num_workers=20  # 开启 20 个线程并发读取
+).load_data()
+
+# 异步加载
+# docs = await reader.aload_data()
+```
+
+**特性 3：按需裁剪**
+
+如果你在加载阶段（还没到切片阶段）就知道某些文件太大或太小，可以直接在加载器层面过滤。
+
+```python
+docs = SimpleDirectoryReader(
+    "./data",
+    required_exts=[".pdf", ".md"],   # 只要这两种后缀
+    exclude=["./data/junk/"],        # 排除这个垃圾文件夹
+).load_data()
+```
+
+##### LlamaIndex vs LangChain 加载器对比总结
+
+| 维度           | LangChain                                  | LlamaIndex                                                   |
+| :------------- | :----------------------------------------- | :----------------------------------------------------------- |
+| **设计哲学**   | 格式转换器（把任意格式变成纯文本）         | 知识索引基石（为构建 Node 树和图谱服务）                     |
+| **核心基类**   | `BaseLoader` -> 输出 `List[Document]`      | `BaseReader` -> 输出 `List[Document]`                        |
+| **调用方式**   | 针对 PDF/MD/HTML 要 `import` 不同的类      | **90% 场景只用 `SimpleDirectoryReader`，通过后缀名自动派发** |
+| **元数据处理** | 通常在加载后手动拼接或用 Unstructured 生成 | 加载器原生支持 `file_metadata` 注入，并自动向下游 Node 传递  |
+| **生态集成**   | 直接写在 `langchain-community` 里          | 统一放在 `LlamaHub` (`llama-index-readers-xxx`)              |
+
+如果你只是想把一个 PDF 的文字抠出来做简单的问答，两者没区别。
+但如果你要构建一个包含几千个文件、需要精准按部门/时间/文件名过滤的**生产级 RAG 系统**，LlamaIndex 的加载器配合其自动继承的元数据机制，能帮你省去大量的“胶水代码”。
 
 ****
 
