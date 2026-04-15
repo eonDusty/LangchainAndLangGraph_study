@@ -114,28 +114,156 @@ Quick Start（在仓库根目录执行）
    
    3. **幂等性**
    
-      幂等性是分布式系统和可靠软件设计中的一个核心概念，它确保一个操作无论执行一次还是多次，其产生的效果和系统状态都保持完全一致。简单来说，**“重复请求，结果不变”**。
+   幂等性是分布式系统和可靠软件设计中的一个核心概念，它确保一个操作无论执行一次还是多次，其产生的效果和系统状态都保持完全一致。简单来说，**“重复请求，结果不变”**。
    
-      幂等性（Idempotence）源于数学，指一个函数或操作多次应用与一次应用的效果相同。在计算机领域，特别是**分布式系统**和**网络通信**中，它是一个关键的设计原则。
+   幂等性（Idempotence）源于数学，指一个函数或操作多次应用与一次应用的效果相同。在计算机领域，特别是**分布式系统**和**网络通信**中，它是一个关键的设计原则。
    
-      - **核心定义**：对于同一个请求，无论被调用多少次，对系统的影响（状态变化）都与第一次调用相同，不会产生多余的副作用。
-      - **关键目的**：主要为了应对**网络不确定性**（如延迟、超时、中断）和**用户重复操作**（如多次点击提交），确保系统在重试时不会出现重复创建订单、重复扣款等严重错误。
+   - **核心定义**：对于同一个请求，无论被调用多少次，对系统的影响（状态变化）都与第一次调用相同，不会产生多余的副作用。
+   - **关键目的**：主要为了应对**网络不确定性**（如延迟、超时、中断）和**用户重复操作**（如多次点击提交），确保系统在重试时不会出现重复创建订单、重复扣款等严重错误。
    
-      **幂等性在HTTP方法中的体现**
+   **幂等性在HTTP方法中的体现**
    
-      RESTful API 的设计直接利用了HTTP方法的天然幂等性来规范行为：
+   RESTful API 的设计直接利用了HTTP方法的天然幂等性来规范行为：
    
-      | HTTP方法   | 幂等性 | 典型用途与说明                                               |
-      | :--------- | :----- | :----------------------------------------------------------- |
-      | **GET**    | **是** | 获取资源。多次请求同一URL，返回结果应相同，且不会改变服务器状态。 |
-      | **PUT**    | **是** | 更新/替换资源。用客户端提供的完整数据替换服务器上的资源。多次用相同数据更新同一资源，最终状态一致。 |
-      | **DELETE** | **是** | 删除资源。第一次删除后，资源不存在。后续相同请求通常会返回404，但不会产生其他影响。 |
-      | **POST**   | **否** | 创建新资源或提交数据。每次请求可能会在服务器上创建一个新的、不同的资源（如新增一条订单）。 |
+   | HTTP方法   | 幂等性 | 典型用途与说明                                               |
+   | :--------- | :----- | :----------------------------------------------------------- |
+   | **GET**    | **是** | 获取资源。多次请求同一URL，返回结果应相同，且不会改变服务器状态。 |
+   | **PUT**    | **是** | 更新/替换资源。用客户端提供的完整数据替换服务器上的资源。多次用相同数据更新同一资源，最终状态一致。 |
+   | **DELETE** | **是** | 删除资源。第一次删除后，资源不存在。后续相同请求通常会返回404，但不会产生其他影响。 |
+   | **POST**   | **否** | 创建新资源或提交数据。每次请求可能会在服务器上创建一个新的、不同的资源（如新增一条订单）。 |
    
+   4. **JWT**
+   
+      **JWT 是一种开放标准（RFC 7519）**，用于在各方之间安全地传输信息。它由三部分组成：
+   
+      ```
+      Header.Payload.Signature
+      类似:eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoxMjMs...
+      ```
+   
+      | 部分          | 作用                                 |
+      | ------------- | ------------------------------------ |
+      | **Header**    | 指定签名算法（如 HS256）和类型       |
+      | **Payload**   | 存放实际数据（用户信息、过期时间等） |
+      | **Signature** | 防止数据被篡改，由服务端用密钥生成   |
+   
+      ```
+      1. 注册
+         用户输入账号密码 -> 密码哈希加密 -> 存入数据库 -> 返回成功
       
+      2. 登录
+         用户输入账号密码 -> 数据库比对密码 -> 成功则生成双 Token
+         ├─ Access Token  (有效期短，如15分钟，用于访问接口)
+         └─ Refresh Token (有效期长，如7天，用于刷新 Access Token)
+      
+      3. 访问受保护资源
+         请求头携带 Access Token -> 后端验证签名和有效期 -> 成功返回数据 / 失败返回 401
+      
+      4. Token 刷新
+         Access Token 过期(401) -> 前端用 Refresh Token 请求刷新接口
+         -> 后端验证 Refresh Token -> 成功则下发新的 Access Token -> 前端重试刚才失败的请求
+      
+      5. 退出登录
+         前端清除本地 Token -> (可选) 后端将 Token 加入黑名单
+      ```
+
+5. **K6 压力测试完全指南**
+
+`k6` 是 Grafana Labs 开源的一款**现代化**性能测试工具。与传统工具（如 JMeter）相比，它最大的优势是**用 JavaScript 编写脚本**，对开发者极其友好，且性能极高（底层用 Go 语言编写）。
+
+| 指标                    | 含义                                             | 关注点                                                       |
+| :---------------------- | :----------------------------------------------- | :----------------------------------------------------------- |
+| **`http_req_duration`** | **总请求耗时**（包含网络、等待、下载）           | 看它的 `p(95)` 和 `p(99)`。不要看 avg，平均数容易掩盖长尾延迟。 |
+| **`http_req_waiting`**  | **服务端处理时间**（从发完请求到收到第一个字节） | 这个值最真实反映你的 Python/FastAPI 代码性能。               |
+| **`checks`**            | 断言通过率                                       | 必须是 `100.00%`，如果有 ✗ 说明有逻辑报错。                  |
+| **`http_req_failed`**   | HTTP 状态码非 2xx/3xx 的比例                     | 结合 `checks` 看，比如网络超时导致 504 就会记在这里。        |
+| **`iterations`**        | 总共执行的次数                                   | 除以时间就是你的系统吞吐量（QPS/TPS）。                      |
+
+一个压测结果：
+```cmd
+F:\A_SCU\Code\面试\project\Travel_Agents>k6 run -e USERNAME=d -e PASSWORD=7 .\perf\k6-trip-plan.js
+
+         /\      Grafana   /‾‾/
+    /\  /  \     |\  __   /  /
+   /  \/    \    | |/ /  /   ‾‾\
+  /          \   |   (  |  (‾)  |
+ / __________ \  |_|\_\  \_____/
+
+
+     execution: local
+        script: .\perf\k6-trip-plan.js
+        output: -
+
+     scenarios: (100.00%) 1 scenario, 15 max VUs, 3m30s max duration (incl. graceful stop):
+              * trip_plan_pressure: Up to 15 looping VUs for 3m0s over 4 stages (gracefulRampDown: 30s, gracefulStop: 30s)
 
 
 
+  █ THRESHOLDS
+
+    checks
+    ✗ 'rate>0.95' rate=81.37%
+
+    http_req_duration
+    ✗ 'p(95)<20000' p(95)=27.86s
+
+    http_req_failed
+    ✗ 'rate<0.05' rate=13.97%
+
+
+  █ TOTAL RESULTS
+
+    checks_total.......: 204    1.06469/s
+    checks_succeeded...: 81.37% 166 out of 204
+    checks_failed......: 18.62% 38 out of 204
+
+    ✓ login status is 200
+    ✗ trip plan status is 200
+      ↳  72% — ✓ 49 / ✗ 19
+    ✗ trip plan success true
+      ↳  72% — ✓ 49 / ✗ 19
+
+    HTTP
+    http_req_duration..............: avg=11.51s min=152.28ms med=3.32s    max=29.72s p(90)=27.03s p(95)=27.86s
+      { expected_response:true }...: avg=10.02s min=152.28ms med=338.05ms max=29.72s p(90)=27.06s p(95)=27.93s
+    http_req_failed................: 13.97% 19 out of 136
+    http_reqs......................: 136    0.709794/s
+
+    EXECUTION
+    iteration_duration.............: avg=24.02s min=7.59s    med=23.01s   max=31.18s p(90)=29.16s p(95)=29.34s
+    iterations.....................: 68     0.354897/s
+    vus............................: 1      min=1         max=15
+    vus_max........................: 15     min=15        max=15
+
+    NETWORK
+    data_received..................: 155 kB 808 B/s
+    data_sent......................: 49 kB  257 B/s
+
+
+
+
+running (3m11.6s), 00/15 VUs, 68 complete and 0 interrupted iterations
+trip_plan_pressure ✓ [======================================] 00/15 VUs  3m0s
+ERRO[0251] thresholds on metrics 'checks, http_req_duration, http_req_failed' have been crossed
+```
+
+说明：
+
+```
+1. 负载量极低（说明问题很严重）
+vus............................: 1 min=1 max=15
+解读：你的压测配置最高只上了 15 个虚拟用户（VUs）。对于现代 Web 服务器来说，15 个并发连“压测”都算不上，只能算“冒烟测试”。在这种几乎不算压力的情况下系统就崩了，说明存在极其严重的阻塞或慢查询。
+2. 业务逻辑大面积崩溃
+✗ trip plan status is 200 (72% 通过率，19 个失败)
+✗ trip plan success true (72% 通过率)
+✓ login status is 200 (100% 通过率)
+解读：登录接口完美运行。但是核心业务接口（行程规划）有 28% 的请求直接报错（状态码非 200，或者返回了错误标识）。结合 http_req_failed: 13.97%，说明有部分请求直接超时或返回了 500 错误。
+3. 响应时间慢得离谱
+http_req_duration avg=11.51s (平均耗时 11.5 秒)
+http_req_duration p(95)=27.86s (95% 的请求在 28 秒内完成)
+iteration_duration avg=24.02s (用户走完一次登录+规划流程平均要等 24 秒)
+解读：用户点一下“生成行程”，平均要干等 11 秒，最慢的要等近 30 秒。没有任何用户能忍受这样的响应速度。你设置的阈值是 p(95)<20000（20秒），但实际跑出了 28 秒，连这个非常宽容的底线都没守住。
+```
 
 
 
@@ -274,6 +402,32 @@ test_splitter_factory.py ....................                                   
 
 ========================================== 20 passed in 0.30s ==========================================  
 ```
+
+****
+
+### 分块转换
+
+这 4 个文件构成了摄取阶段的“转换层”，用于在分块进入嵌入/索引前做统一增强：
+
+- src/ingestion/transform/base_transform.py
+
+定义所有转换器的抽象接口 BaseTransform。核心是 transform(chunks, trace)，约束各实现类输入输出（分块列表进、分块列表出），并强调单一职责、原子处理、可观测和优雅降级。
+
+- src/ingestion/transform/chunk_refiner.py
+
+做文本内容精炼：先规则清洗（去噪、HTML 清理、空白规范化、保留代码块等），再可选用 LLM 做智能改写增强。支持并行处理、失败回退到规则结果，并在 metadata 里记录 refined_by。
+
+- src/ingestion/transform/image_captioner.py
+
+做图片语义补全：识别 chunk 文本中的 [IMAGE: id] 引用，调用 Vision LLM 生成图片描述，把描述回填到文本和 metadata（如 image_captions）。带缓存和并行能力，避免重复图像调用，提升性能与成本效率。
+
+- src/ingestion/transform/metadata_enricher.py
+
+做结构化元数据增强：为每个 chunk 生成 title/summary/tags。先规则提取（标题、摘要、关键词），可选 LLM 生成更语义化元数据；失败时回退并保留最小可用元数据，记录 enriched_by 与 trace 信息。
+
+整体上可理解为：
+
+BaseTransform 定规范，ChunkRefiner 优化正文，ImageCaptioner补视觉语义，MetadataEnricher补结构化语义。
 
 ****
 
@@ -442,6 +596,32 @@ tests/unit/test_batch_processor.py::test_process_deterministic_output PASSED   [
 一句话：它是 ingestion 阶段“向量落库”的统一入口，重点保障可重复、可追溯、可批量。
 
 ****
+
+### Pipline
+
+核心函数：src/ingestion/pipeline.py 。
+
+这个程序的作用可以概括为：
+
+- 总编排器：IngestionPipeline 串联整个文档摄取流程，从文件到向量与索引落库。
+
+- 6 阶段流水线：
+  - 完整性检查（SHA256，支持跳过已处理文件）
+  - 文档加载（PDF + 图片抽取）
+  - 文档分块
+  - 转换增强（分块精炼、元数据增强、图片描述）
+  - 编码（Dense 向量 + Sparse/BM25 统计）
+  - 存储（向量库、BM25 索引、图片索引）
+
+- 结果封装：PipelineResult 统一返回成功状态、分块数、图片数、向量信息和各阶段统计。
+
+- 可观测与回调：支持 trace 阶段记录和 on_progress 进度回调，便于调试与前端进度展示。
+
+- 幂等与容错：通过完整性检查实现增量处理；异常时标记失败并返回错误信息；成功时写入处理历史。
+
+- 便捷入口：run_pipeline(...) 提供函数式调用，内部负责加载配置、执行流水线并在结束时释放资源。
+
+
 
 ### LangChain LangGraph 相关工具接口
 
@@ -1729,3 +1909,393 @@ Milvus 是以下场景的理想选择：
 - **超大规模数据**：预期向量数据量超过亿级，需要分布式架构。
 - **高并发在线服务**：需要毫秒级响应和高吞吐量（QPS）。
 - **企业级关键应用**：对系统稳定性、可用性和扩展性有严苛要求的推荐系统、搜索引擎、图像视频检索等
+
+****
+
+#### Memory
+
+在构建基于大语言模型（LLM）的应用时，LLM 本身是**无状态的**。它就像一个“失忆症患者”，每次请求都是独立的，不知道之前说过什么。
+
+**Memory（记忆机制）的作用，就是弥补 LLM 的这一缺陷，让应用具备上下文感知能力。**
+
+##### Memory类型
+
+记忆可以定义为获取、存储、保留和后续提取信息的过程。人脑中存在多种类型的记忆。
+
+1. **感觉记忆**：这是记忆的最初阶段，使人能够在原始刺激结束后保留感觉信息（视觉、听觉等）的印象。感觉记忆通常只能持续几秒钟。其子类别包括图像记忆（视觉）、回声记忆（听觉）和触觉记忆（触觉）。
+2. **短期记忆**（STM）或**工作记忆**：它存储我们当前意识到的、用于执行复杂认知任务（例如学习和推理）的信息。短期记忆的容量据信约为7个项目（[Miller，1956](https://lilianweng.github.io/posts/2023-06-23-agent/psychclassics.yorku.ca/Miller/)），持续时间为20-30秒。
+3. **长期记忆**（LTM）：长期记忆能够将信息存储很长时间，从几天到几十年不等，存储容量几乎无限。长期记忆有两种亚型：
+   - 显性/陈述性记忆：这是对事实和事件的记忆，指的是那些可以被有意识地回忆起来的记忆，包括情景记忆（事件和经历）和语义记忆（事实和概念）。
+   - 内隐/程序性记忆：这种类型的记忆是无意识的，涉及自动执行的技能和程序，例如骑自行车或在键盘上打字。
+
+在 AI 架构的演进中，**LangChain** 和 **LangGraph** 代表了两种截然不同的记忆设计哲学：前者侧重于**单链对话的包装**，后者侧重于**复杂图状态的全局管理**。
+
+##### Langchain的 Memory 机制：面向“对话链”的封装
+
+LangChain 早期的 Memory 设计非常直观，它的核心思想是：**在每次调用 LLM 之前，自动把历史对话拼接到 Prompt 中。**
+
+**1. 核心原理：隐式的 Prompt 拼接**
+
+无论你用哪种 Memory，底层逻辑都是：取出历史消息 -> 格式化 -> 插入到 System/Human 消息之前。
+
+**2. 主流的 Memory 类型**
+
+- ConversationBufferMemory（缓冲记忆）：
+  - **原理**：原封不动地保存所有的 `Human` 和 `AI` 消息。
+  - **缺点**：容易撑爆 Token 窗口。
+- ConversationBufferWindowMemory（滑动窗口记忆）：
+  - **原理**：只保留最近 *K* 轮对话，老对话直接丢弃。
+  - **优点**：控制了 Token 成本，但彻底丢失了早期上下文。
+- ConversationSummaryMemory（摘要记忆）：
+  - **原理**：在后台悄悄调一次 LLM，把旧对话总结成一段话，只保留摘要和最新几轮对话。
+  - **优点**：极大地节省 Token。
+- ConversationEntityMemory（实体记忆）：
+  - **原理**：通过信息抽取（NER），记住对话中出现的“实体”及其属性（例如：记住“张三 -> 职业:程序员，爱好:打游戏”）。
+
+**3. LangChain Memory 的致命痛点（为什么会被边缘化？）**
+
+- **与 `Runnable` 接口不兼容**：LangChain 后来推出了强大的 LCEL（LangChain Expression Language），一切皆 `Runnable`。但旧版 Memory 是个黑盒，很难优雅地融入 `.pipe()` 链式调用中。
+- **只支持单线程**：如果你用同一个 Chain 同时服务两个用户 A 和 B，他们的记忆会串台（因为底层共用一个 List 存消息）。
+- **无法持久化**：程序一重启，内存里的 List 就清空了。
+
+**解决上述痛点的现代方案（仍在 LangChain 体系内）：**
+不再使用特定的 Memory 类，而是直接使用 **`BaseChatMessageHistory`**（如 `RedisChatMessageHistory` 或 `SQLChatMessageHistory`）配合 `RunnableWithMessageHistory`，手动把历史消息注入到 Prompt 中。这把控制权交还给了开发者。
+
+##### LangGraph的 Memory 机制：面向“状态图”的全局共享
+
+LangGraph 是为了构建**多步骤 Agent（智能体）**而生的。在 Agent 场景下，“记忆”不仅仅是聊天记录，还包括：**当前走到了哪个节点？上一步工具调用的返回值是什么？有没有死循环？**
+
+因此，LangGraph **彻底抛弃了传统的 Memory 类**，转而使用了**状态机**的概念。
+
+**1. 核心原理：State 就是 Memory**
+
+在 LangGraph 中，你定义一个 `State`（通常是一个继承自 `TypedDict` 的 Python 字典）。这个 State 在图的所有节点之间传递，**State 的内容就是图的全部记忆**。
+
+```python
+from typing import TypedDict, Annotated
+from langgraph.graph import StateGraph
+
+# 定义状态（这就是 Memory 的结构）
+class AgentState(TypedDict):
+    # 核心记忆：完整的消息列表
+    messages: Annotated[list, add_messages] 
+    
+    # 扩展记忆：你可以随意加任何东西！
+    current_plan: str      # 记住当前的计划
+    retrieved_docs: list   # 记住 RAG 检索到的文档
+    loop_count: int        # 记住循环了多少次（防死锁）
+
+# 注解 Annotated[list, add_messages] 是魔法所在：
+# 它告诉 LangGraph，如果新节点返回了新消息，不要覆盖旧消息，而是“追加”到 list 中。
+```
+
+**2. LangGraph 实现多轮对话的流程**
+
++ 用户发起第 2 轮提问。
++ LangGraph 从**外部持久化存储**（如 Postgres、Redis）中加载之前的 `messages` 列表，构建出当前的 `State`。
++ 图开始执行，节点读取 `State["messages"]`，就能看到第 1 轮的记录。
++ 节点产生新回复，返回 `{"messages": [new_message]}`。
++ 因为有 `add_messages` 注解，新回复被追加到 State 中。
++ 图执行结束前，触发**检查点**，将最新的 State 整体保存回数据库。
+
+**3. 为什么 LangGraph 的设计更高级？**
+
+- **多用户隔离天然支持**：因为每个图的执行都绑定了唯一的 `thread_id`（对应数据库里的一行记录），A 用户和B用户的 State 完全物理隔离。
+- **“时间旅行”**：这是 LangGraph 的杀手级功能。因为每次执行都保存了 State 的快照，你可以获取任意历史时刻的 State，甚至**回滚到过去的状态继续执行**。
+- **不仅仅是聊天**：State 里面可以存检索结果、代码片段、结构化数据。这对于复杂的 RAG Agent 来说至关重要。
+
+| 维度           | LangChain            | LangGraph                |
+| -------------- | -------------------- | ------------------------ |
+| **架构复杂度** | 线性、简单           | 图结构、复杂             |
+| **状态管理**   | 基于对话历史的列表   | 基于图的全局状态         |
+| **适用场景**   | 客服机器人、问答系统 | 复杂任务编排、多代理系统 |
+| **持久化支持** | 有限                 | 原生支持检查点           |
+| **扩展性**     | 适合原型开发         | 适合生产环境             |
+
+### MCP Skills Harness
+
+#### MCP
+
+MCP （Model Context Protocol，模型上下文协议）定义了应用程序和 AI 模型之间交换上下文信息的方式。这使得开发者能够**以一致的方式将各种数据源、工具和功能连接到 AI 模型**（一个中间协议层），就像 USB-C 让不同设备能够通过相同的接口连接一样。MCP 的目标是创建一个通用标准，使 AI 应用程序的开发和集成变得更加简单和统一。
+
+MCP 采用 “客户端-主机-服务器”（Client-Host-Server） 的三层架构：
+
+|  Host  | 控制中心   | **通常是运行AI模型的应用程序（如Claude Desktop、IDE），负责管理多个Client实例、用户授权和整体安全策略。** |
+| :----: | ---------- | ------------------------------------------------------------ |
+| Client | 通信桥梁   | 运行在Host内，与特定的MCP Server建立一对一的有状态连接。负责协议协商、消息路由和调用服务器提供的功能。 |
+| Server | 能力提供者 | 独立的轻量程序，封装对某类数据源或工具的访问（如GitHub、数据库、文件系统），通过标准化接口向Client提供资源(Resources)、工具(Tools) 和提示模板(Prompts) |
+
+**MCP 的stdio模式以及Streamable HTTP模式**
+
+1. **Stdio模式：本地进程通信**
+
+Stdio（标准输入/输出）模式是MCP最早定义的传输机制，其核心是让客户端将MCP服务器作为一个子进程启动，并通过标准输入（stdin）和标准输出（stdout）进行通信。
+
+**关键特征**
+
+- 进程启动：客户端负责启动服务器进程，例如通过命令行运行 your-mcp-server。
+
+- 通信方式：所有请求和响应都通过标准输入输出流传递，通常使用JSON-RPC格式
+
+- 适用场景：非常适合本地开发和命令行工具集成，Claude桌面应用就主要使用此模式
+
+2. **Streamable HTTP模式：网络服务通信**
+
+随着MCP协议的发展，引入了Streamable HTTP作为新的传输方式，用以替代原先的HTTP + SSE。这种模式使MCP服务器可以像传统Web服务一样运行。
+
+**关键特征**
+
+- HTTP接口：服务器暴露一个HTTP端点，客户端通过POST请求发送JSON-RPC消息。
+
+- 流式支持：虽然名为"Streamable HTTP"，但主要通过HTTP进行请求-响应通信，对于实时通知可通过SSE（Server-Sent Events）实现。
+
+- 部署优势：非常适合云原生环境，可以部署在云服务器、容器中，通过API网关访问。
+
+3. **实际应用建议**
+
+- 开发环境：使用Stdio模式，便于调试和快速迭代。
+
+- 生产环境：使用Streamable HTTP模式，便于扩展和远程访问。
+
+```python
+import asyncio
+from typing import List
+from langchain_core.tools import BaseTool
+from langchain_mcp_adapters.client import MultiServerMCPClient
+
+from langgraph.prebuilt import create_react_agent
+from langchain_core.messages import HumanMessage
+from langchain.chat_models import init_chat_model
+
+_tools = None
+
+async def get_tool() -> List[BaseTool]:
+    global _tools
+    # streamable_http方式
+    client = MultiServerMCPClient({
+        # 高德地图MCP Server
+        "amap-maps-streamableHTTP": {
+            "url": f"https://mcp.amap.com/mcp?key=5fxxxxxxxxxxxxxxxx7c",
+            "transport": "streamable_http"
+        }
+    })
+
+    # stdio方式
+    # client = MultiServerMCPClient({
+    #     # 高德地图MCP Server
+    #     "amap-mcp-server": {
+    #         "command": "uvx",
+    #         "args": [
+    #             "amap-mcp-server"
+    #         ],
+    #         "env": {
+    #             "AMAP_MAPS_API_KEY": "5fxxxxxxxxxxxxxxxxxxxxxxxxx7c"
+    #         },
+    #         "transport": "stdio"
+    #     }
+    # })
+
+    _tools = await client.get_tools()
+
+    print(f"✅ 成功获取 {len(_tools)} 个工具")
+    # print(f"🔍 工具列表:\n" + "\n".join(t.name for t in _tools))
+    # print(f"tools:\n\n" + "\n\n".join(str(tool) for tool in _tools) + "\n")
+
+    return _tools
+
+async def run_graph_agent():
+    tools = await get_tool()
+
+    model = init_chat_model(
+    "Qwen/Qwen3-8B",
+    model_provider="openai",
+    base_url = "https://api.siliconflow.cn/v1",
+    api_key = "sk-frhxxxxxxxxxxxxxxxxxxxxxxxxxsezvtvjtmckx"
+    )
+
+    agent = create_react_agent(
+        model,
+        tools=tools,
+        # max_retries = 3,
+        prompt="你是一个有用的助手，可以使用高德地图工具来帮用户查询地点、路线。"
+    )
+
+    # ==================== 执行 Agent ====================
+    result = await agent.ainvoke({
+        "messages": [HumanMessage(content="从北京故宫到颐和园怎么走？")]
+    })
+
+    # ==================== 打印所有中间结果 ====================
+    print("=" * 60)
+    print("📋 完整执行过程（中间结果）")
+    print("=" * 60)
+
+    for i, msg in enumerate(result["messages"]):
+        print(f"\n--- 第 {i+1} 步 ---")
+        msg_type = msg.__class__.__name__
+
+        if msg_type == "HumanMessage":
+            print(f"👤 用户输入: {msg.content}")
+
+        elif msg_type == "AIMessage":
+            # 大模型可能同时在思考文本 + 调用工具
+            if msg.content:
+                print(f"🤖 大模型思考: {msg.content}")
+            if msg.tool_calls:
+                for tc in msg.tool_calls:
+                    print(f"🔧 调用工具: {tc['name']}")
+                    print(f"   📥 传入参数: {tc['args']}")
+
+        elif msg_type == "ToolMessage":
+            # 工具返回结果可能很长，截断显示
+            content = str(msg.content)
+            if len(content) > 500:
+                content = content[:500] + f"\n... (省略 {len(content) - 500} 字符)"
+            print(f"📦 工具返回 ({msg.name}):")
+            print(f"   {content}")
+
+    print("\n" + "=" * 60)
+    print("🎯 最终回答:")
+    print("=" * 60)
+    print(result["messages"][-1].content)
+
+if __name__ == '__main__':
+    asyncio.run(run_graph_agent())
+
+    # 测试一下是否真的拿到了
+    # for i in range(len(tools)):
+    #     print(f"\n🎯 主程序拿到工具了，第{i}个工具是: {tools[i].name}")
+   
+```
+
+#### Skills
+
+**代理技能（Skills）**是一种用于封装可复用行为的机制，通过 `SKILL.md` 文件定义，使 LLM 能够**按需加载、按需执行**特定能力。
+
+简单来说，**Skill 就是 AI 可以调用的一项能力封装**。
+
+**设计上的亮点是“渐进式披露”**：
+
+- **元数据**常驻上下文，AI 知道有哪些技能可用。
+- **正文**按需加载，只有触发时才读取，避免挤占 Token。
+
+复杂点的 Skill，还会有附加的资源目录、脚本和参考文档。
+
+```
+skill-name/
+├── SKILL.md          # 必需：元数据（何时使用）+ 正文（指令、流程、示例）
+├── scripts/          # 可选：可执行脚本（Python/Bash），按需调用
+├── references/       # 可选：参考文档，按需读取
+└── assets/           # 可选：模板、图片等资源
+```
+
+**渐进式披露机制：**
+
+1. **元数据层（Metadata） 始终加载**
+
+   - Name：skill的名称
+
+   - Description：skill的作用描述
+
+2. **指令层（Instruction） 按需加载**
+   - Skill.md中去了名称和描述之外的内容
+
+3. **资源层（Resource）按需中的按需加载**
+
+   - Reference：是被读取的，Reference.md
+
+   - Script：是被执行的 （Python 脚本、Shell 命令、API 调用函数）
+
+#### 两者的区别
+
+Skills 和 MCP 代表了智能体技术栈中两个关键的抽象层：
+
+| **组件**   | **一句话定义**             | **形象类比** | **关键理解**                       |
+| ---------- | -------------------------- | ------------ | ---------------------------------- |
+| **MCP**    | 标准化的工具接入协议       | USB-C 接口   | 解决外部系统"如何接入"（连通性）   |
+| **Skills** | 用自然语言定义的 sub-agent | 任务说明书   | 解决复杂任务"如何编排"（执行逻辑） |
+
+| 维度         | MCP (Model Context Protocol)               | Skills                                         |
+| :----------- | :----------------------------------------- | :--------------------------------------------- |
+| **核心思路** | **标准化连接**：通过 JSON-RPC 统一数据格式 | **逻辑编排**：用自然语言描述复杂执行路径       |
+| **定义方式** | 在 Server 端用代码（TS/Python）写死逻辑    | 在 `SKILL.md` 中用自然语言引导模型决策         |
+| **环境依赖** | 需要运行一个 MCP Server 进程               | 依赖可执行环境（如本地 Shell 或沙箱）          |
+| **哲学**     | **以协议为中心**：一次编写，所有 AI 通用   | **以模型为中心**：利用模型推理能力处理不确定性 |
+
+- **MCP 解决的是连通性** ：它像 USB-C，让 AI 能以统一格式读文件、查数据库。
+- **Skills 解决的是编排逻辑** ：它像一份说明书，告诉 AI 如何执行复杂任务流——这些任务完全可以包括调用多个 MCP 工具。
+- **两者的关系** ：它们解决的是不同层面的问题。MCP 负责把外部系统接入进来，Skills 负责决定什么时候用、怎么组合这些能力。一个高级 Skill 的底层往往就是调用多个 MCP 工具
+
+**高频问题**：
+
+1. **Skills 是什么？** → 延迟加载的 sub-agent，解决"如何编排"问题
+2. **Skills 和 MCP 的区别？** → MCP 负责连通性，Skills 负责执行逻辑，互补关系
+3. **如何降低 token 消耗？** → 渐进式披露：元数据常驻，正文按需加载
+4. **什么是渐进式披露？** → 三层架构：元数据 → 正文 → 附加资源
+5. **如何编写高质量 Skills？** → 精准 description + 单一职责 + 确定性优先
+
+#### Harness 核心概念
+
+ **一、Harness 到底是什么？**
+
+一句话：**Agent = Model + Harness。你不是模型，那你就是 Harness。**
+
+**Harness 就是模型之外的一切**——系统提示词、工具调用、文件系统、沙箱环境、编排逻辑、钩子中间件、反馈回路、约束机制。模型本身只是能力的来源，只有通过 Harness 把状态、工具、反馈和约束串起来，它才真正变成一个 Agent。
+
+| 层级                    | 解决的核心问题                                 | 关注点                                       | 典型工作                                   |
+| ----------------------- | ---------------------------------------------- | -------------------------------------------- | ------------------------------------------ |
+| **Prompt Engineering**  | 表达——怎么写好指令                             | 塑造局部概率空间，让模型听懂意图             | 系统提示词设计、Few-shot 示例、思维链引导  |
+| **Context Engineering** | 信息——给 Agent 看什么                          | 确保模型在合适的时机拿到正确且必要的事实信息 | 上下文管理、RAG、记忆注入、Token 优化      |
+| **Harness Engineering** | 执行——整个系统怎么防崩、怎么量化、怎么持续运转 | 长链路任务中的持续正确、偏差纠正、故障恢复   | 文件系统、沙箱、约束执行、熵管理、反馈回路 |
+
+简单任务里，提示词最重要——你把话说清楚就行；依赖外部知识的任务里，上下文很关键——你得把正确的信息喂进去；但在长链路、可执行、低容错的真实商业场景里，Harness 才是决定成败的东西。一线团队的重心都放在了 Harness 上，原因就在这。
+
+**包含的组件**
+
+理解 Harness 的最好方式，不是直接看它包含什么，而是看模型做不到什么。不管大模型看起来多能干，本质就是一个文本（或图像、音频）进、文本出的函数。
+
+**模型做不到的，就是 Harness 要补的：**
+
+| 模型做不到                         | Harness 怎么补                     | 核心组件         |
+| ---------------------------------- | ---------------------------------- | ---------------- |
+| 记住多轮对话历史                   | 维护对话历史，每次请求时拼进上下文 | **记忆系统**     |
+| 执行代码、跑命令                   | 提供 Bash + 代码执行环境           | **通用执行环境** |
+| 获取实时信息（新库版本、API 变化） | Web Search、MCP 工具               | **外部知识获取** |
+| 操作文件和环境                     | 文件系统抽象 + Git 版本控制        | **文件系统**     |
+| 知道自己做对了没有                 | 沙箱环境 + 测试工具 + 浏览器自动化 | **验证闭环**     |
+| 在长任务中保持连贯                 | 上下文压缩、记忆文件、进度追踪     | **上下文管理**   |
+
+把这些”模型做不了但你希望 Agent 能做到”的事情一个个补上，就得到了 Harness 的核心组件。LangChain 把这件事拆解为五个子系统：文件系统（持久化）、Bash 执行（通用工具）、沙箱环境（安全隔离）、记忆机制（跨会话积累）、上下文压缩（对抗衰减）。
+
+**二、Harness进阶**
+
+**六层体系**
+
+| 层级   | 名称                   | 解决什么问题                   | 关键设计                                                     |
+| ------ | ---------------------- | ------------------------------ | ------------------------------------------------------------ |
+| **L1** | **信息边界层**         | Agent 该知道什么、不该知道什么 | 定义角色与目标，裁剪无关信息，结构化组织任务状态             |
+| **L2** | **工具系统层**         | Agent 怎么跟外部世界交互       | 工具的选拔、调用时机、结果的提炼与反馈                       |
+| **L3** | **执行编排层**         | 多步骤任务怎么串起来           | 让模型像人一样走完“理解目标→判断信息→分析→生成→检查”的完整轨道 |
+| **L4** | **记忆与状态层**       | 长任务中间结果怎么管           | 独立管理当前任务状态、中间产物和长期记忆，防止系统混乱       |
+| **L5** | **评估与观测层**       | Agent 怎么知道自己做对了没有   | 建立独立于生成过程的验证机制，让 Agent 具备“自知之明”        |
+| **L6** | **约束、校验与恢复层** | 出错了怎么办                   | 预设规则拦截错误，失败时（API 超时、格式混乱）提供重试或回滚机制 |
+
+可以类比成给一个新手员工搭建的完整工作环境。L1 是岗位说明书（告诉 ta 该关注什么），L2 是办公工具（给 ta 用什么干活），L3 是标准操作流程（按什么步骤做事），L4 是项目管理系统和笔记本（怎么记住做过的事），L5 是质检流程（怎么检验做对了没有），L6 是红线规则和应急预案（什么事绝对不能做、出了事怎么补救）。
+
+Harness Engineering 相关的高频面试问题整理在下面，方便你快速回顾：
+
+**基础概念**
+
+| 问题                                                         | 核心回答                                                     |
+| ------------------------------------------------------------ | ------------------------------------------------------------ |
+| **Harness 是什么？**                                         | 模型之外的一切——系统提示词、工具调用、文件系统、沙箱、编排逻辑、约束机制。Agent = Model + Harness。 |
+| **Harness 和 Prompt Engineering、Context Engineering 的关系？** | 嵌套关系：Prompt ⊂ Context ⊂ Harness。三者分别解决表达、信息、执行三个层面的问题。 |
+| **为什么瓶颈不在模型而在 Harness？**                         | [Can.ac](http://Can.ac) 实验证明同一模型只换工具调用格式，分数从 6.7% 跳到 68.3%。基础设施质量决定了模型能力的实际发挥。 |
+
+**架构设计**
+
+| 问题                           | 核心回答                                                     |
+| ------------------------------ | ------------------------------------------------------------ |
+| **Harness 六层架构是什么？**   | L1 信息边界 → L2 工具系统 → L3 执行编排 → L4 记忆与状态 → L5 评估与观测 → L6 约束校验与恢复。从“定义边界”到“兜底恢复”的完整闭环。 |
+| **上下文管理有什么经验法则？** | 利用率控制在 40% 以内。超过后 Agent 质量明显下降（幻觉增多、兜圈子）。策略是压缩或交接，不是继续塞信息。 |
+| **单 Agent 还是多 Agent？**    | 规模决定。小项目单 Agent 够用（Hashimoto 模式），大项目几乎必然需要专业化分工（Carlini 用 16 个并行 Agent）。 |
